@@ -1,0 +1,12 @@
+pdf:
+    storage:
+        path: /data/generated_pdfs
+server:
+    port: 8080
+spring:
+    application:
+        name: pdfgenerator
+    servlet:
+        multipart:
+            max-file-size: 10MB
+            max-request-size: 10MB
