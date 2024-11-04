@@ -1,12 +1,14 @@
 package com.hamzaelkhatib.pdfgenerator.service;
 
 import com.microsoft.playwright.*;
+import com.microsoft.playwright.options.LoadState;
+import com.microsoft.playwright.options.Margin;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.UrlResource;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.*;
 import java.util.UUID;
@@ -30,26 +32,35 @@ public class PdfGeneratorService {
 
         try (Playwright playwright = Playwright.create()) {
             Browser browser = playwright.chromium().launch();
-            Page page = browser.newPage();
+            BrowserContext context = browser.newContext();
+            Page page = context.newPage();
 
             page.navigate(dataUrl);
+            page.waitForLoadState(LoadState.NETWORKIDLE);
+
+            Margin margin = new Margin();
+            margin.setTop("50");
+            margin.setRight("50");
+            margin.setBottom("50");
+            margin.setLeft("50");
+
             page.pdf(new Page.PdfOptions()
                     .setPath(processingPath)
-                    .setFormat("A4")
-                    .setMargin(new Page.PdfMargins()
-                            .setTop(50.0)
-                            .setBottom(50.0)
-                            .setLeft(50.0)
-                            .setRight(50.0))
-            );
+                    .setFormat("a4")
+                    .setMargin(margin));
 
-            // Move processing file to completed
             Files.move(processingPath, completedPath, StandardCopyOption.REPLACE_EXISTING);
 
+            context.close();
             browser.close();
         } catch (Exception e) {
-            e.printStackTrace();
-            // Handle error - maybe create an error status file
+            try {
+                Path errorPath = Paths.get(storagePath, jobId + "-error.txt");
+                Files.writeString(errorPath, e.getMessage());
+                Files.deleteIfExists(processingPath);
+            } catch (IOException ioe) {
+                ioe.printStackTrace();
+            }
         }
     }
 
@@ -60,16 +71,11 @@ public class PdfGeneratorService {
 
     public Resource getCompletedPdf(String jobId) {
         try {
-            Path completedPath = Paths.get(storagePath, jobId + "-completed.pdf");
-            if (Files.exists(completedPath)) {
-                Resource resource = new UrlResource(completedPath.toUri());
-
-                // After successful retrieval, delete the file
-                Files.deleteIfExists(completedPath);
-
-                return resource;
+            File file = Paths.get(storagePath, jobId + "-completed.pdf").toFile();
+            if (file.exists()) {
+                return new FileSystemResource(file);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
         return null;
