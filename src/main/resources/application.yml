@@ -2,23 +2,28 @@ pdf:
     storage:
         path: /data/generated_pdfs
     cleanup:
-        retention-minutes: 1440      # 24 hours * 60 minutes
-        interval-minutes: 60         # run cleanup every 60 minutes
+        retention-minutes: 30      # keep generated PDFs for 30 minutes
+        interval-minutes: 2         # run cleanup every 2 minutes
+    generation:
+        articles-per-pdf: 200
+        batch-size: 2
+    executor:
+        pool-size: 1    # Max number of concurrent PDF generation tasks
     batch:
         default-size: 1
         max-retries: 3
         retry-delay-seconds: 5
-    default:
-        page-size: a4
-        orientation: portrait
-        margin: 50
-        compression-quality: 75
+#    default:
+#        page-size: a4
+#        orientation: portrait
+#        margin: 50
+#        compression-quality: 75
 server:
     port: 8080
 spring:
     application:
         name: pdfgenerator
-    servlet:
-        multipart:
-            max-file-size: 100MB
-            max-request-size: 100MB
+#    servlet:
+#        multipart:
+#            max-file-size: 100MB
+#            max-request-size: 100MB

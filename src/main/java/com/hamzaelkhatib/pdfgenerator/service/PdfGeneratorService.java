@@ -1,9 +1,5 @@
 package com.hamzaelkhatib.pdfgenerator.service;
 
-import com.hamzaelkhatib.pdfgenerator.model.BatchConfig;
-import com.hamzaelkhatib.pdfgenerator.model.JobProgress;
-import com.hamzaelkhatib.pdfgenerator.model.JobResponse;
-import com.hamzaelkhatib.pdfgenerator.model.PdfConfig;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
@@ -11,41 +7,50 @@ import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.Margin;
 import jakarta.annotation.PostConstruct;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.io.File;
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
-@Slf4j
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class PdfGeneratorService {
 
+	@Getter
 	@Value("${pdf.storage.path}")
 	private String storagePath;
 
-	@Value("${pdf.cleanup.retention-minutes:1440}")
+	@Value("${pdf.cleanup.retention-minutes:30}")
 	private int retentionMinutes;
 
-	private final Map<String, JobProgress> jobProgressMap = new ConcurrentHashMap<>();
-	private final PdfCompressionService pdfCompressionService;
+	@Value("${pdf.ranking.root}")
+	private String rootUrl;
 
-	public PdfGeneratorService(PdfCompressionService pdfCompressionService) {
-		this.pdfCompressionService = pdfCompressionService;
-	}
+	@Value("${pdf.ranking.articles-per-pdf:200}")
+	private int articlesPerPdf;
+
+	@Value("${pdf.ranking.batch-size:2}")
+	private int batchSize;
+
+	private final PdfCompressionService pdfCompressionService;
 
 	@PostConstruct
 	public void init() {
@@ -56,109 +61,126 @@ public class PdfGeneratorService {
 		}
 	}
 
-	public JobResponse startPdfGeneration(String dataUrl, int numberOfArticles, PdfConfig pdfConfig,
-			BatchConfig batchConfig) {
-		final String jobId = UUID.randomUUID().toString();
-
-		final JobProgress progress = new JobProgress();
-		progress.setJobId(jobId);
-		progress.setStatus("QUEUED");
-		progress.setTotalItems(numberOfArticles);
-		this.jobProgressMap.put(jobId, progress);
-
-		this.generatePdfAsync(jobId, dataUrl, numberOfArticles, pdfConfig, batchConfig);
-
-		final JobResponse response = new JobResponse();
-		response.setJobId(jobId);
-		response.setProgress(progress);
-		return response;
+	public void createPendingFile(String taskId) throws IOException {
+		final Path pendingPath = Paths.get(this.storagePath, taskId + "-pending.pdf");
+		Files.createFile(pendingPath);
 	}
 
 	@Async
-	public void generatePdfAsync(String jobId, String dataUrl, int numberOfArticles, PdfConfig pdfConfig,
-			BatchConfig batchConfig) {
-		final JobProgress progress = this.jobProgressMap.get(jobId);
-		progress.setStatus("PROCESSING");
+	public void generatePdfAsync(String taskId, String dataUrl, int numberOfArticles) {
+		final Path processingPath = Paths.get(this.storagePath, taskId + "-processing.pdf");
+		final Path completedPath = Paths.get(this.storagePath, taskId + "-completed.pdf");
+		final Path pendingPath = Paths.get(this.storagePath, taskId + "-pending.pdf");
+		final List<Path> chunkPaths = new ArrayList<>();
 
-		final Path processingPath = Paths.get(this.storagePath, jobId + "-processing.pdf");
-		final Path completedPath = Paths.get(this.storagePath, jobId + "-completed.pdf");
+		try {
+			// Generate URLs for each chunk
+			final List<String> urls = new ArrayList<>();
+			for (int offset = 0; offset < numberOfArticles; offset += this.articlesPerPdf) {
+				final int limit = Math.min(this.articlesPerPdf, numberOfArticles - offset);
+				final String url = String.format("%s/%d/%d?dataUrl=%s", this.rootUrl, offset, limit,
+						URLEncoder.encode(dataUrl, StandardCharsets.UTF_8));
+				urls.add(url);
+			}
 
-		int retryCount = 0;
-		boolean success = false;
+			log.info("Generated {} chunks for {} articles", urls.size(), numberOfArticles);
 
-		while (!success && retryCount < batchConfig.getMaxRetries()) {
-			try (final Playwright playwright = Playwright.create()) {
-				final Browser browser = playwright.chromium().launch();
-				final BrowserContext context = browser.newContext();
-				final Page page = context.newPage();
+			// Process chunks in batches
+			for (int i = 0; i < urls.size(); i += this.batchSize) {
+				final int batchIndex = i; // Make final for lambda
+				final List<String> batchUrls = urls.subList(i, Math.min(i + this.batchSize, urls.size()));
+				final List<CompletableFuture<Path>> batchFutures = batchUrls.stream()
+						.map(url -> CompletableFuture.supplyAsync(() -> this.generateChunk(taskId, url, batchIndex)))
+						.collect(Collectors.toList());
 
-				page.navigate(dataUrl);
-				page.waitForLoadState(LoadState.NETWORKIDLE);
+				// Wait for batch completion
+				CompletableFuture.allOf(batchFutures.toArray(new CompletableFuture[0])).join();
 
-				// Configure margins
-				final Margin margin = new Margin();
-				margin.setTop(pdfConfig.getMargin().getTop());
-				margin.setRight(pdfConfig.getMargin().getRight());
-				margin.setBottom(pdfConfig.getMargin().getBottom());
-				margin.setLeft(pdfConfig.getMargin().getLeft());
-
-				// Configure PDF options
-				final Page.PdfOptions pdfOptions = new Page.PdfOptions().setPath(processingPath)
-						.setFormat(pdfConfig.getPageSize())
-						.setLandscape("landscape".equalsIgnoreCase(pdfConfig.getOrientation())).setMargin(margin);
-
-				page.pdf(pdfOptions);
-
-				// Compress PDF if requested
-				if (pdfConfig.isCompress()) {
-					this.pdfCompressionService.compressPdf(processingPath, processingPath,
-							pdfConfig.getCompressionQuality());
-				}
-
-				Files.move(processingPath, completedPath, StandardCopyOption.REPLACE_EXISTING);
-
-				context.close();
-				browser.close();
-
-				success = true;
-				progress.setStatus("COMPLETED");
-				progress.updateProgress(numberOfArticles, numberOfArticles);
-
-			} catch (final Exception e) {
-				log.error("Error generating PDF (attempt " + (retryCount + 1) + ")", e);
-				retryCount++;
-
-				if (retryCount >= batchConfig.getMaxRetries()) {
-					progress.setStatus("FAILED");
-					progress.setError(e.getMessage());
+				// Collect successful chunks
+				for (final CompletableFuture<Path> future : batchFutures) {
 					try {
-						final Path errorPath = Paths.get(this.storagePath, jobId + "-error.txt");
-						Files.writeString(errorPath, e.getMessage());
-						Files.deleteIfExists(processingPath);
-					} catch (final IOException ioe) {
-						log.error("Error writing error file", ioe);
-					}
-				} else {
-					try {
-						Thread.sleep(batchConfig.getRetryDelaySeconds() * 1000L);
-					} catch (final InterruptedException ie) {
-						Thread.currentThread().interrupt();
-						break;
+						final Path chunkPath = future.get();
+						if (chunkPath != null) {
+							chunkPaths.add(chunkPath);
+						}
+					} catch (final Exception e) {
+						log.error("Chunk generation failed", e);
 					}
 				}
+			}
+
+			// Merge chunks if we have any
+			if (!chunkPaths.isEmpty()) {
+				this.mergePdfChunks(chunkPaths, completedPath);
+
+				// Cleanup chunks after successful merge
+				for (final Path chunkPath : chunkPaths) {
+					Files.deleteIfExists(chunkPath);
+				}
+
+				// After successful completion, remove pending file
+				Files.deleteIfExists(pendingPath);
+			} else {
+				log.error("No PDF chunks were successfully generated for taskId: " + taskId);
+			}
+
+		} catch (final Exception e) {
+			log.error("Error generating PDF for taskId: " + taskId, e);
+		} finally {
+			try {
+				Files.deleteIfExists(processingPath);
+			} catch (final IOException e) {
+				log.error("Error cleaning up processing file for taskId: " + taskId, e);
 			}
 		}
 	}
 
-	@Scheduled(fixedDelayString = "${pdf.cleanup.interval-minutes:60}000")
+	private Path generateChunk(String taskId, String url, int index) {
+		final Path chunkPath = Paths.get(this.storagePath, taskId + "-chunk-" + index + ".pdf");
+
+		try (final Playwright playwright = Playwright.create()) {
+			final Browser browser = playwright.chromium().launch();
+			final BrowserContext context = browser.newContext();
+			final Page page = context.newPage();
+
+			page.navigate(url);
+			page.waitForLoadState(LoadState.NETWORKIDLE);
+
+			page.pdf(new Page.PdfOptions().setPath(chunkPath).setFormat("A4")
+					.setMargin(new Margin().setTop("1cm").setRight("1cm").setBottom("1cm").setLeft("1cm")));
+
+			context.close();
+			browser.close();
+			return chunkPath;
+
+		} catch (final Exception e) {
+			log.error("Error generating chunk for index: " + index, e);
+			return null;
+		}
+	}
+
+	private void mergePdfChunks(List<Path> chunkPaths, Path outputPath) throws IOException {
+		try (final PDDocument mergedDoc = new PDDocument()) {
+			for (final Path chunkPath : chunkPaths) {
+				try (final PDDocument chunkDoc = PDDocument.load(chunkPath.toFile())) {
+					for (int i = 0; i < chunkDoc.getNumberOfPages(); i++) {
+						mergedDoc.importPage(chunkDoc.getPage(i));
+					}
+				}
+			}
+			// Save as compressed
+			this.pdfCompressionService.savePdfCompressed(mergedDoc, outputPath);
+		}
+	}
+
+	@Scheduled(fixedDelayString = "${pdf.cleanup.interval-minutes:2}000")
 	public void cleanupOldFiles() {
 		try {
 			final LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(this.retentionMinutes);
 
 			Files.walk(Paths.get(this.storagePath)).filter(Files::isRegularFile).filter(path -> {
 				try {
-					return Files.getLastModifiedTime(path).toInstant()
-							.isBefore(cutoffTime.toInstant(java.time.ZoneOffset.UTC));
+					return Files.getLastModifiedTime(path).toInstant().isBefore(cutoffTime.toInstant(ZoneOffset.UTC));
 				} catch (final IOException e) {
 					return false;
 				}
@@ -173,26 +195,5 @@ public class PdfGeneratorService {
 		} catch (final IOException e) {
 			log.error("Error during cleanup", e);
 		}
-	}
-
-	public JobProgress getJobProgress(String jobId) {
-		return this.jobProgressMap.get(jobId);
-	}
-
-	public boolean isProcessing(String jobId) {
-		final JobProgress progress = this.jobProgressMap.get(jobId);
-		return progress != null && "PROCESSING".equals(progress.getStatus());
-	}
-
-	public Resource getCompletedPdf(String jobId) {
-		try {
-			final File file = Paths.get(this.storagePath, jobId + "-completed.pdf").toFile();
-			if (file.exists()) {
-				return new FileSystemResource(file);
-			}
-		} catch (final Exception e) {
-			log.error("Error retrieving completed PDF", e);
-		}
-		return null;
 	}
 }
