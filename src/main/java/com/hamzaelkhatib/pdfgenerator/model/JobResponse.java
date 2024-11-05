@@ -1,17 +1,13 @@
 package com.hamzaelkhatib.pdfgenerator.model;
 
+import lombok.Data;
+import lombok.Getter;
+import lombok.Setter;
+
+@Data
+@Getter
+@Setter
 public class JobResponse {
-    private String jobId;
-
-    public JobResponse(String jobId) {
-        this.jobId = jobId;
-    }
-
-    public String getJobId() {
-        return jobId;
-    }
-
-    public void setJobId(String jobId) {
-        this.jobId = jobId;
-    }
+	private String jobId;
+	private JobProgress progress;
 }

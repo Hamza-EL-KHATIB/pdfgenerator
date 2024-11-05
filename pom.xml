@@ -52,6 +52,20 @@
             <artifactId>playwright</artifactId>
             <version>${playwright.version}</version>
         </dependency>
+
+        <!-- For PDF Compression -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>2.0.27</version>
+        </dependency>
+
+        <!-- For Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.7</version>
+        </dependency>
     </dependencies>
 
     <build>
