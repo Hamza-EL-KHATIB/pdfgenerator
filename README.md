@@ -128,8 +128,7 @@ spring:
 
 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/pdf-generator.git
-cd pdf-generator
+cd pdfgenerator
 ```
 
 2. Install Playwright dependencies
