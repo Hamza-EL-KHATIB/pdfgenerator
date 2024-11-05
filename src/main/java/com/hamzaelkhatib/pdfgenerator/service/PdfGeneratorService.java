@@ -87,7 +87,7 @@ public class PdfGeneratorService {
 
 			// Process chunks in batches
 			for (int i = 0; i < urls.size(); i += this.batchSize) {
-				final int batchIndex = i; // Make final for lambda
+				final int batchIndex = i;
 				final List<String> batchUrls = urls.subList(i, Math.min(i + this.batchSize, urls.size()));
 				final List<CompletableFuture<Path>> batchFutures = batchUrls.stream()
 						.map(url -> CompletableFuture.supplyAsync(() -> this.generateChunk(taskId, url, batchIndex)))

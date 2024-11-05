@@ -3,7 +3,6 @@ package com.hamzaelkhatib.pdfgenerator.controller;
 import com.hamzaelkhatib.pdfgenerator.service.PdfCompressionService;
 import com.hamzaelkhatib.pdfgenerator.service.PdfGeneratorService;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -28,11 +27,13 @@ import java.util.UUID;
 @Slf4j
 public class PdfController {
 
-	@Autowired
-	private PdfGeneratorService pdfGeneratorService;
+	private final PdfGeneratorService pdfGeneratorService;
+	private final PdfCompressionService pdfCompressionService;
 
-	@Autowired
-	private PdfCompressionService pdfCompressionService;
+	public PdfController(PdfGeneratorService pdfGeneratorService, PdfCompressionService pdfCompressionService) {
+		this.pdfGeneratorService = pdfGeneratorService;
+		this.pdfCompressionService = pdfCompressionService;
+	}
 
 	@Value("${cors.allowed-origin}")
 	private String allowedOrigin;
