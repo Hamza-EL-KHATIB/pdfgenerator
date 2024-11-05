@@ -1,0 +1,17 @@
+pdf:
+  storage:
+    path: "./generated_pdfs"
+  ranking:
+    root: "http://localhost:8080/export/pdf"
+    domain: "localhost"
+    environment: "local"
+    articles-per-pdf: 200
+    batch-size: 2
+  executor:
+    pool-size: 1
+
+cors:
+  allowed-origin: "http://localhost:3000"
+
+server:
+  port: 8080

@@ -1,7 +1,7 @@
 package com.hamzaelkhatib.pdfgenerator.controller;
 
-import com.hamzaelkhatib.pdfgenerator.service.PdfCompressionService;
 import com.hamzaelkhatib.pdfgenerator.service.PdfGeneratorService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.FileSystemResource;
@@ -28,11 +28,9 @@ import java.util.UUID;
 public class PdfController {
 
 	private final PdfGeneratorService pdfGeneratorService;
-	private final PdfCompressionService pdfCompressionService;
 
-	public PdfController(PdfGeneratorService pdfGeneratorService, PdfCompressionService pdfCompressionService) {
+	public PdfController(PdfGeneratorService pdfGeneratorService) {
 		this.pdfGeneratorService = pdfGeneratorService;
-		this.pdfCompressionService = pdfCompressionService;
 	}
 
 	@Value("${cors.allowed-origin}")
@@ -40,18 +38,17 @@ public class PdfController {
 
 	@GetMapping("/generateRankingPdf")
 	public ResponseEntity<Map<String, String>> generatePdf(@RequestParam String dataUrl,
-			@RequestParam int numberOfArticles) {
+			@RequestParam int numberOfArticles, HttpServletRequest request) {
 
 		final String taskId = UUID.randomUUID().toString();
+		final String cookie = request.getHeader("Cookie");
 
 		try {
-			// Create pending file using service method
 			this.pdfGeneratorService.createPendingFile(taskId);
 
-			// Start async generation
-			this.pdfGeneratorService.generatePdfAsync(taskId, dataUrl, numberOfArticles);
+			// Pass cookie to service
+			this.pdfGeneratorService.generatePdfAsync(taskId, dataUrl, numberOfArticles, cookie);
 
-			// Set response headers
 			final HttpHeaders headers = new HttpHeaders();
 			headers.set("Access-Control-Allow-Credentials", "true");
 			headers.set("Access-Control-Expose-Headers", "X-Auth-Token");
@@ -73,37 +70,23 @@ public class PdfController {
 	public ResponseEntity<?> checkStatus(@RequestParam String taskId) {
 		final Path pendingPath = Paths.get(this.pdfGeneratorService.getStoragePath(), taskId + "-pending.pdf");
 		final Path completedPath = Paths.get(this.pdfGeneratorService.getStoragePath(), taskId + "-completed.pdf");
-		final Path decompressedPath = Paths.get(this.pdfGeneratorService.getStoragePath(),
-				taskId + "-decompressed.pdf");
 
-		try {
-			if (Files.exists(completedPath)) {
-				// Decompress PDF
-				final byte[] decompressedPdf = this.pdfCompressionService.decompressPdf(completedPath);
-				Files.write(decompressedPath, decompressedPdf);
+		if (Files.exists(completedPath)) {
 
-				// Delete the compressed version since we'll serve the decompressed one
-				Files.deleteIfExists(completedPath);
+			// Create resource from completed file
+			final Resource resource = new FileSystemResource(completedPath.toFile());
 
-				// Create resource from decompressed file
-				final Resource resource = new FileSystemResource(decompressedPath.toFile());
+			// Set up response
+			return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
+					.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + taskId + ".pdf\"")
+					.header("Access-Control-Allow-Origin", this.allowedOrigin)
+					.header("Access-Control-Allow-Credentials", "true")
+					.header("Access-Control-Expose-Headers", "X-Auth-Token").header("Vary", "Origin").body(resource);
 
-				// Set up response
-				return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
-						.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + taskId + ".pdf\"")
-						.header("Access-Control-Allow-Origin", this.allowedOrigin)
-						.header("Access-Control-Allow-Credentials", "true")
-						.header("Access-Control-Expose-Headers", "X-Auth-Token").header("Vary", "Origin")
-						.body(resource);
-
-			} else if (Files.exists(pendingPath)) {
-				return ResponseEntity.noContent().build();
-			} else {
-				return ResponseEntity.ok("File removed or does not exist");
-			}
-		} catch (final IOException e) {
-			log.error("Error handling PDF status check", e);
-			throw new RuntimeException("Failed to process PDF", e);
+		} else if (Files.exists(pendingPath)) {
+			return ResponseEntity.noContent().build();
+		} else {
+			return ResponseEntity.ok("File removed or does not exist");
 		}
 	}
 }
