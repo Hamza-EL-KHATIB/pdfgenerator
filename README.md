@@ -145,11 +145,6 @@ mvn exec:java -e -D exec.mainClass=com.microsoft.playwright.CLI -D exec.args="in
 mvn clean package
 ```
 
-4. Run the application
-```bash
-java -jar target/pdfgenerator-0.0.1-SNAPSHOT.jar
-```
-
 ## 4. API Documentation
 
 ### Endpoints
