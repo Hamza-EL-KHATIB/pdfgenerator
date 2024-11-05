@@ -1,5 +1,6 @@
 package com.hamzaelkhatib.pdfgenerator.controller;
 
+import com.hamzaelkhatib.pdfgenerator.config.ConfigProperties;
 import com.hamzaelkhatib.pdfgenerator.service.PdfGeneratorService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -29,8 +30,11 @@ public class PdfController {
 
 	private final PdfGeneratorService pdfGeneratorService;
 
-	public PdfController(PdfGeneratorService pdfGeneratorService) {
+	private final ConfigProperties configProperties;
+
+	public PdfController(PdfGeneratorService pdfGeneratorService, ConfigProperties configProperties) {
 		this.pdfGeneratorService = pdfGeneratorService;
+		this.configProperties = configProperties;
 	}
 
 	@Value("${cors.allowed-origin}")
@@ -68,8 +72,8 @@ public class PdfController {
 
 	@GetMapping("/checkPdfStatus")
 	public ResponseEntity<?> checkStatus(@RequestParam String taskId) {
-		final Path pendingPath = Paths.get(this.pdfGeneratorService.getStoragePath(), taskId + "-pending.pdf");
-		final Path completedPath = Paths.get(this.pdfGeneratorService.getStoragePath(), taskId + "-completed.pdf");
+		final Path pendingPath = Paths.get(this.configProperties.getStorage().getPath(), taskId + "-pending.pdf");
+		final Path completedPath = Paths.get(this.configProperties.getStorage().getPath(), taskId + "-completed.pdf");
 
 		if (Files.exists(completedPath)) {
 
