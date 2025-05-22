@@ -97,8 +97,8 @@ pdf:
         file-retention-duration-ms: 1800000  # 30 minutes
         cleanup-interval-ms: 600000          # 10 minutes
     ranking:
-        root: "https://comercial.central.inditex.grp/cdarkspa-st4/web/export"
-        domain: "comercial.central.inditex.grp"
+        root: "https://url/cdarkspa-st4/web/export"
+        domain: "url"
         environment: "local"
         articles-per-pdf: 200
         batch-size: 2
@@ -107,7 +107,7 @@ pdf:
     pages-to-remove: 2
 
 cors:
-    allowed-origin: "https://comercial.central.inditex.grp"
+    allowed-origin: "https://url"
 
 server:
     port: 8080
